@@ -1,5 +1,6 @@
 (ns com.fulcrologic.rad.rendering.semantic-ui.form
   (:require
+    [com.fulcrologic.fulcro-i18n.i18n :refer [tr trc]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.options-util :refer [?! narrow-keyword]]
     [com.fulcrologic.rad.ui-validation :as validation]
@@ -7,7 +8,6 @@
     [com.fulcrologic.rad.control :as control]
     [com.fulcrologic.rad.blob :as blob]
     [com.fulcrologic.fulcro.dom.events :as evt]
-    [com.fulcrologic.fulcro-i18n.i18n :refer [tr]]
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     [com.fulcrologic.fulcro.application :as app]
     #?(:cljs [com.fulcrologic.fulcro.dom :as dom :refer [div h3 button i span]]
@@ -17,26 +17,26 @@
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.fulcro.algorithms.merge :as merge]
     [taoensso.encore :as enc]
-    [taoensso.timbre :as log]))
+    [taoensso.timbre :as log]
+    [com.fulcrologic.rad.semantic-ui-options :as suo]))
 
 (defn render-to-many [{::form/keys [form-instance] :as env} {k ::attr/qualified-key :as attr} {::form/keys [subforms] :as options}]
   (let [{:semantic-ui/keys [add-position]
-         ::form/keys       [ui title can-delete? can-add? added-via-upload?]} (get subforms k)
+         ::form/keys       [ui title can-delete? can-add? added-via-upload?]
+         ::keys            [ref-container-class]} (get subforms k)
         form-instance-props (comp/props form-instance)
         read-only?          (form/read-only? form-instance attr)
-        can-add?            (if read-only? false can-add?)
-        can-delete?         (fn [item] (and (not read-only?) (?! can-delete? form-instance-props item)))
+        add?                (if read-only? false (?! can-add? form-instance attr))
+        delete?             (fn [item] (and (not read-only?) (?! can-delete? form-instance item)))
         items               (get form-instance-props k)
         title               (?! (or title (some-> ui (comp/component-options ::form/title)) "") form-instance form-instance-props)
         invalid?            (validation/invalid-attribute-value? env attr)
         validation-message  (validation/validation-error-message env attr)
-        add                 (when (or (nil? can-add?) (?! can-add? form-instance-props))
-                              (let [add?  (?! can-add? form-instance-props)
-                                    order (if (keyword? add?) add? :append)]
+        add                 (when (or (nil? add?) add?)
+                              (let [order (if (keyword? add?) add? :append)]
                                 (if (?! added-via-upload? env)
                                   (dom/input {:type     "file"
                                               :onChange (fn [evt]
-                                                          (log/info "UPLOAD FILE!!!")
                                                           (let [new-id     (tempid/tempid)
                                                                 js-file    (-> evt blob/evt->js-files first)
                                                                 attributes (comp/component-options ui ::form/attributes)
@@ -65,7 +65,7 @@
         (div :.ui.error.message
           validation-message))
       (if (seq items)
-        (div :.ui.segments
+        (div {:className (or (?! ref-container-class env) "ui segments")}
           (mapv
             (fn [props]
               (ui-factory props
@@ -73,13 +73,13 @@
                   env
                   {::form/parent          form-instance
                    ::form/parent-relation k
-                   ::form/can-delete?     (if can-delete? (?! can-delete?) false)})))
+                   ::form/can-delete?     (if delete? (delete? props) false)})))
             items))
         (div :.ui.message "None."))
       (when (= :bottom add-position) add))))
 
 (defn render-to-one [{::form/keys [form-instance] :as env} {k ::attr/qualified-key :as attr} {::form/keys [subforms] :as options}]
-  (let [{::form/keys [ui can-delete? title]} (get subforms k)
+  (let [{::form/keys [ui can-add? can-delete? title ref-container-class]} (get subforms k)
         form-props         (comp/props form-instance)
         props              (get form-props k)
         title              (?! (or title (some-> ui (comp/component-options ::form/title)) "") form-instance form-props)
@@ -89,25 +89,24 @@
         std-props          {::form/nested?         true
                             ::form/parent          form-instance
                             ::form/parent-relation k
-                            ::form/can-delete?     (if can-delete?
-                                                     ;; for a to-one, the parent is the same form instance
-                                                     (partial can-delete? form-props)
+                            ::form/can-delete?     (or
+                                                     (?! can-delete? form-instance form-props)
                                                      false)}]
     (cond
       props
-      (div {:key (str k)}
+      (div {:key (str k) :classes [(?! ref-container-class env)]}
         (h3 :.ui.header title)
         (when invalid?
           (div :.ui.error.message validation-message))
         (ui-factory props (merge env std-props)))
 
-      :else
-      (div {:key (str k)}
+      (or (nil? can-add?) (?! can-add? form-instance attr))
+      (div {:key (str k) :classes [(?! ref-container-class env)]}
         (h3 :.ui.header title)
-        (button {:onClick (fn [] (form/add-child! (assoc env
-                                                    ::form/parent-relation k
-                                                    ::form/parent form-instance
-                                                    ::form/child-class ui)))} "Create")))))
+        (button :.ui.primary.button {:onClick (fn [] (form/add-child! (assoc env
+                                                                        ::form/parent-relation k
+                                                                        ::form/parent form-instance
+                                                                        ::form/child-class ui)))} (tr "Create"))))))
 
 (defn standard-ref-container [env {::attr/keys [cardinality] :as attr} options]
   (if (= :many cardinality)
@@ -115,7 +114,7 @@
     (render-to-one env attr options)))
 
 (defn render-single-file [{::form/keys [form-instance] :as env} {k ::attr/qualified-key :as attr} {::form/keys [subforms] :as options}]
-  (let [{::form/keys [ui can-delete? title pick-one label] :as subform-options} (get subforms k)
+  (let [{::form/keys [ui can-delete?]} (get subforms k)
         parent     (comp/props form-instance)
         form-props (comp/props form-instance)
         props      (get form-props k)
@@ -125,14 +124,14 @@
                     ::form/parent          form-instance
                     ::form/parent-relation k
                     ::form/can-delete?     (if can-delete?
-                                             (partial can-delete? parent)
+                                             (can-delete? parent props)
                                              false)}]
     (if props
       (div :.field {:key (str k)}
         (dom/label label)
         (ui-factory props (merge env std-props)))
       (div {:key (str k)}
-        (div "Upload??? (TODO)")))))
+        (div (tr "Upload??? (TODO)"))))))
 
 (defsc ManyFiles [this {{::form/keys [form-instance master-form] :as env} :env
                         {k ::attr/qualified-key :as attr}                 :attribute
@@ -144,18 +143,18 @@
         read-only?          (or
                               (form/read-only? master-form attr)
                               (form/read-only? form-instance attr))
-        can-add?            (if read-only? false (?! can-add? form-instance attr))
-        can-delete?         (if read-only? false (fn [item] (?! can-delete? form-instance-props item)))
+        add?                (if read-only? false (?! can-add? form-instance attr))
+        delete?             (if read-only? false (fn [item] (?! can-delete? form-instance item)))
         items               (-> form-instance comp/props k
                               (cond->
                                 sort-children sort-children))
         title               (?! (or title (some-> ui (comp/component-options ::form/title)) "") form-instance form-instance-props)
         upload-id           (str k "-file-upload")
-        add                 (when (or (nil? can-add?) (?! can-add? form-instance-props))
+        add                 (when (or (nil? add?) add?)
                               (dom/div
                                 (dom/label :.ui.green.button {:htmlFor upload-id}
                                   (dom/i :.ui.plus.icon)
-                                  "Add File")
+                                  (tr "Add File"))
                                 (dom/input {:type     "file"
                                             ;; trick: changing the key on change clears the input, so a failed upload can be retried
                                             :key      (comp/get-state this :input-key)
@@ -192,10 +191,10 @@
                   env
                   {::form/parent          form-instance
                    ::form/parent-relation k
-                   ::form/can-delete?     (if can-delete? (?! can-delete?) false)})))
+                   ::form/can-delete?     (if delete? (?! delete? props) false)})))
             items))
         (div :.ui.message
-          "None"))
+          (trc "there are no files in a list of uploads" "No files.")))
 
       (when (= :bottom add-position) add))))
 
@@ -298,6 +297,7 @@
         read-only-form? (or
                           (?! (comp/component-options form-instance ::form/read-only?) form-instance)
                           (?! (comp/component-options master-form ::form/read-only?) master-form))
+
         invalid?        (if read-only-form? false (form/invalid? env))
         render-fields   (or (form/form-layout-renderer env) standard-form-layout-renderer)]
     (when #?(:cljs goog.DEBUG :clj true)
@@ -306,25 +306,33 @@
         (log/debug "Form " (comp/component-name form-instance) " valid? " valid?)
         (log/debug "Form " (comp/component-name form-instance) " dirty? " dirty?)))
     (if nested?
-      (div :.ui.segment
+      (div {:className (or (?! (comp/component-options form-instance ::ref-element-class) env) "ui segment")}
         (div :.ui.form {:classes [(when invalid? "error")]
                         :key     (str (comp/get-ident form-instance))}
           (when can-delete?
-            (button :.ui.icon.primary.right.floated.button {:disabled (not (?! can-delete? props))
+            (button :.ui.icon.primary.right.floated.button {:disabled (not can-delete?)
                                                             :onClick  (fn []
                                                                         (form/delete-child! env))}
               (i :.times.icon)))
           (render-fields env)))
       (let [{::form/keys [title action-buttons controls]} (comp/component-options form-instance)
-            title (?! title form-instance props)
+            title          (?! title form-instance props)
             action-buttons (if action-buttons action-buttons form/standard-action-buttons)]
-        (div :.ui.container {:key (str (comp/get-ident form-instance))}
-          (div :.ui.top.attached.segment
+        (div {:key       (str (comp/get-ident form-instance))
+              :className (or
+                           (?! (suo/get-rendering-options form-instance suo/layout-class) env)
+                           (?! (comp/component-options form-instance ::top-level-class) env)
+                           "ui container")}
+          (div {:className (or
+                             (?! (suo/get-rendering-options form-instance suo/controls-class) env)
+                             (?! (comp/component-options form-instance ::controls-class) env)
+                             "ui top attached segment")}
             (dom/h3 :.ui.header
               title
               (div :.ui.right.floated.buttons
                 (keep #(control/render-control master-form %) action-buttons))))
-          (div :.ui.attached.form {:classes [(when invalid? "error")]}
+          (div {:classes [(or (?! (comp/component-options form-instance ::form-class) env) "ui attached form")
+                          (when invalid? "error")]}
             (div :.ui.error.message (tr "The form has errors and cannot be saved."))
             (div :.ui.attached.segment
               (render-fields env))))))))
@@ -373,7 +381,7 @@
         :href    (str url "?filename=" filename)
         :onClick (fn [evt]
                    #?(:cljs (when-not (or (not (blob/blob-downloadable? props sha-key))
-                                        (js/confirm "View/download?"))
+                                        (js/confirm (tr "View/download?")))
                               (evt/stop-propagation! evt)
                               (evt/prevent-default! evt))))}
        (dom/div :.ui.tiny.image
@@ -381,12 +389,12 @@
            (dom/i :.huge.skull.crossbones.icon)
            (dom/i :.huge.file.icon)))
        (div :.middle.aligned.content
-         (str filename (cond failed? " (Upload failed. Delete and try again.)"
-                             dirty? " (unsaved)")))
+         (str filename (cond failed? (str " (" (tr "Upload failed. Delete and try again.") ")")
+                             dirty? (str " (" (tr "unsaved") ")"))))
        (dom/button :.ui.red.icon.button {:onClick (fn [evt]
                                                     (evt/stop-propagation! evt)
                                                     (evt/prevent-default! evt)
-                                                    (when #?(:clj true :cljs (js/confirm "Permanently Delete File?"))
+                                                    (when #?(:clj true :cljs (js/confirm (tr "Permanently Delete File?")))
                                                       (form/delete-child! env)))}
          (dom/i :.times.icon))))))
 

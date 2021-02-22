@@ -1,12 +1,13 @@
 (ns com.fulcrologic.rad.rendering.semantic-ui.text-field
   (:require
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
-    #?(:cljs [com.fulcrologic.fulcro.dom :refer [div label input]]
-       :clj  [com.fulcrologic.fulcro.dom-server :refer [div label input]])
+    #?(:cljs [com.fulcrologic.fulcro.dom :refer [div label input textarea]]
+       :clj  [com.fulcrologic.fulcro.dom-server :refer [div label input textarea]])
     [com.fulcrologic.fulcro.dom.events :as evt]
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.ui-validation :as validation]
+    [com.fulcrologic.rad.options-util :refer [?!]]
     [com.fulcrologic.rad.rendering.semantic-ui.components :refer [ui-wrapped-dropdown]]
     [com.fulcrologic.rad.rendering.semantic-ui.field :refer [render-field-factory]]))
 
@@ -47,7 +48,7 @@
   (let [{k           ::attr/qualified-key
          ::attr/keys [required?]} attribute
         values             (form/field-style-config env attribute :sorted-set/valid-values)
-        input-props        (form/field-style-config env attribute :input/props)
+        input-props        (?! (form/field-style-config env attribute :input/props) env)
         options            (mapv (fn [v] {:text v :value v}) values)
         props              (comp/props form-instance)
         value              (and attribute (get props k))
@@ -66,3 +67,13 @@
            :onChange  (fn [v] (form/input-changed! env k v))}
           input-props)))))
 
+(def render-multi-line
+  (render-field-factory (fn [{:keys [value onChange onBlur] :as props}]
+                          (textarea (assoc props
+                                      :value (or value "")
+                                      :onBlur (fn [evt]
+                                                (when onBlur
+                                                  (onBlur (evt/target-value evt))))
+                                      :onChange (fn [evt]
+                                                  (when onChange
+                                                    (onChange (evt/target-value evt)))))))))

@@ -6,6 +6,7 @@
          [com.fulcrologic.semantic-ui.modules.dropdown.ui-dropdown :refer [ui-dropdown]]]
         :clj
         [[com.fulcrologic.fulcro.dom-server :as dom :refer [div label input]]])
+    [com.fulcrologic.fulcro-i18n.i18n :refer [tr]]
     [com.fulcrologic.rad.ui-validation :as validation]
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     [com.fulcrologic.rad.options-util :refer [?!]]
@@ -26,12 +27,12 @@
                :value k}) enumerated-values))))
 
 (defn- render-to-many [{::form/keys [form-instance] :as env} {::form/keys [field-label]
-                                                              ::attr/keys [qualified-key] :as attribute}]
+                                                              ::attr/keys [qualified-key computed-options] :as attribute}]
   (when (form/field-visible? form-instance attribute)
     (let [props        (comp/props form-instance)
           read-only?   (form/read-only? form-instance attribute)
-          options      (enumerated-options env attribute)
-          selected-ids (get props qualified-key #{})]
+          options      (or (?! computed-options env) (enumerated-options env attribute))
+          selected-ids (set (get props qualified-key))]
       (div :.ui.field {:key (str qualified-key)}
         (label (or field-label (some-> qualified-key name str/capitalize)))
         (div :.ui.middle.aligned.celled.list.big {:style {:marginTop "0"}}
@@ -52,23 +53,23 @@
             options))))))
 
 (defn- render-to-one [{::form/keys [form-instance] :as env} {::form/keys [field-label]
-                                                             ::attr/keys [qualified-key] :as attribute}]
+                                                             ::attr/keys [qualified-key computed-options] :as attribute}]
   (when (form/field-visible? form-instance attribute)
     (let [props      (comp/props form-instance)
           read-only? (form/read-only? form-instance attribute)
           invalid?   (validation/invalid-attribute-value? env attribute)
-          user-props (form/field-style-config env attribute :input/props)
-          options    (enumerated-options env attribute)
+          user-props (?! (form/field-style-config env attribute :input/props) env)
+          options    (or (?! computed-options env) (enumerated-options env attribute))
           value      (get props qualified-key)]
       (div :.ui.field {:key (str qualified-key) :classes [(when invalid? "error")]}
-        (label (str (or field-label (some-> qualified-key name str/capitalize))
-                 (when invalid? " (Required)")))
+        (label (str (or (?! field-label form-instance) (some-> qualified-key name str/capitalize))
+                 (when invalid? (str " (" (tr "Required") ")"))))
         (if read-only?
           (let [value (first (filter #(= value (:value %)) options))]
-            (:text value))
+            (dom/input {:readOnly ""
+                        :value    (:text value)}))
           (ui-wrapped-dropdown (merge
-                                 {:disabled read-only?
-                                  :options  options
+                                 {:options  options
                                   :value    value
                                   :onChange (fn [v] (form/input-changed! env qualified-key v))}
                                  user-props)))))))
